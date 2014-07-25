@@ -1,0 +1,896 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+//////////////////////////////////////////////////////////////////
+// Copyright (c) 2008-2013 Esri. All Rights Reserved.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+////////////////////////////////////////////////////////////////
+
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//
+// Developed initially by esri https://github.com/lheberlie/portal-widget-flex
+//
+// This version Enhanced by G&H International Services, Inc. on behalf of the National Information Sharing Consortium (NISC)
+// vUSA Common Library Widget version 1.0
+// alan 1/10/2014
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+-->
+<viewer:BaseWidget xmlns:fx="http://ns.adobe.com/mxml/2009"
+				   xmlns:s="library://ns.adobe.com/flex/spark"
+				   xmlns:mx="library://ns.adobe.com/flex/mx"
+				   xmlns:viewer="com.esri.viewer.*"
+				   xmlns:esri="http://www.esri.com/2008/ags"
+				   xmlns:renderers="widgets.Portal.renderers.*"
+				   xmlns:components="widgets.Portal.components.*"
+				   currentState="loggedout"
+				   widgetConfigLoaded="init()">
+	
+	<fx:Style>
+		.yellow { 
+			
+			color: #FFFF00;
+		}
+	</fx:Style>
+	
+	<viewer:states>
+		<s:State name="loggedin"/>
+		<s:State name="loggedout"/>
+		<s:State name="layers"/>
+	</viewer:states>
+	
+	<fx:Script>
+		<![CDATA[
+			import com.esri.ags.Map;
+			import com.esri.ags.events.PortalEvent;
+			import com.esri.ags.events.WebMapEvent;
+			import com.esri.ags.geometry.Extent;
+			import com.esri.ags.layers.ArcGISDynamicMapServiceLayer;
+			import com.esri.ags.layers.ArcGISImageServiceLayer;
+			import com.esri.ags.layers.ArcGISTiledMapServiceLayer;
+			import com.esri.ags.layers.CSVLayer;
+			import com.esri.ags.layers.FeatureLayer;
+			import com.esri.ags.layers.GeoRSSLayer;
+			import com.esri.ags.layers.KMLLayer;
+			import com.esri.ags.layers.Layer;
+			import com.esri.ags.layers.OpenStreetMapLayer;
+			import com.esri.ags.layers.WMSLayer;
+			import com.esri.ags.layers.WebTiledLayer;
+			import com.esri.ags.layers.supportClasses.Field;
+			import com.esri.ags.portal.WebMapUtil;
+			import com.esri.ags.portal.supportClasses.PortalGroup;
+			import com.esri.ags.portal.supportClasses.PortalItem;
+			import com.esri.ags.portal.supportClasses.PortalQueryParameters;
+			import com.esri.ags.portal.supportClasses.PortalQueryResult;
+			import com.esri.ags.portal.supportClasses.PortalUser;
+			import com.esri.ags.tasks.GeometryServiceSingleton;
+			import com.esri.ags.virtualearth.VETiledLayer;
+			import com.esri.viewer.AppEvent;
+			import com.esri.viewer.utils.ErrorMessageUtil;
+			import com.esri.viewer.utils.LayerObjectUtil;
+			
+			import mx.collections.ArrayCollection;
+			import mx.collections.ArrayList;
+			import mx.controls.Alert;
+			import mx.events.CloseEvent;
+			import mx.rpc.Fault;
+			import mx.rpc.Responder;
+			import mx.rpc.events.FaultEvent;
+			import mx.rpc.events.ResultEvent;
+			import mx.rpc.http.HTTPService;
+			
+			import spark.events.DropDownEvent;
+			import spark.events.IndexChangeEvent;
+			
+			import widgets.Portal.components.PortalLoginPopup;
+			import widgets.Portal.components.SortObject;
+			import widgets.Portal.events.AddToMapEvent;
+			import widgets.Portal.events.DeleteFromMapEvent;
+			import widgets.Portal.events.LoginEvent;
+			import widgets.Portal.events.PortalQueryEvent;
+			import widgets.Portal.events.SortByEvent;
+			
+		
+			
+			private var _defaultSortField:String = "";
+			private var _defaultSortLabel:String = "";
+			private var _defaultSortOrder:String = "";
+			private var _numberPerPage:int = 14; //default
+			
+			[Bindable]
+			private var _numberColumns:int = 1; //default
+			
+			[Bindable]
+			private var _searchText:String = "";
+			
+			[Bindable]
+			private var _searchTotal:int = 0;
+			
+			[Bindable]
+			public var username:String;
+			
+			[Bindable]
+			public var password:String;
+			
+			[Bindable]
+			private var _tokenURL:String = "";
+			
+			[Bindable]
+			private var _arcgisOnlineURL:String = "";
+			
+			[Bindable]
+			private var _defaultGroupID:String = "";
+			
+			[Bindable]
+			private var _defaultGroupLabel:String = "";
+			
+			[Bindable]
+			private var lastQueryResult:PortalQueryResult;
+			
+			[Bindable]
+			private var lastQueryString:String;
+			
+			[Bindable]
+			private var lastSortOrder:SortObject;
+			
+			[Bindable]
+			private var portalItemsArrayList:ArrayList;
+			
+			[Bindable]
+			private var groupResultsAC:ArrayCollection= new ArrayCollection;
+			
+			private var currentGroupTitle:String="All My Groups";
+			
+			private var currentGroupID:String;
+			
+			private var defaultQueryParameters:PortalQueryParameters;
+			
+			private var resultsArray:Array=new Array;
+			
+			private var myItems:ArrayCollection=new ArrayCollection;
+			
+			
+	
+			
+			protected function init():void
+			{
+				if (configXML)
+				{
+					trace("loaded XML");
+					
+					portalWidget.addTitlebarButton( "./widgets/Portal/assets/images/Search.png", "Search ArcGIS Online", goSearch);
+					portalWidget.addTitlebarButton( "./widgets/Portal/assets/images/Remove.png", "Remove Layers", goLayers);
+				
+					
+					_tokenURL = configXML.tokenurl;
+					_arcgisOnlineURL = configXML.arcgisonlineurl;
+					_defaultGroupID = configXML.defaultgroupid;
+					_defaultGroupLabel = configXML.defaultgrouplabel;
+					_numberPerPage = configXML.resultsperpage;
+					_numberColumns = (configXML.columnsize == "full") ? 2 : 1;
+					
+					_searchText = configXML.defaultsearch;
+					
+					portalArcGIS.url = _arcgisOnlineURL;
+					
+					searchTextInput.text=_searchText;
+					/*  ADD THIS TO ADD TO DEFAULT SORTING CAPABILITY */
+					
+					_defaultSortField = (configXML.defaultsortfield == "") ? null : configXML.defaultsortfield;
+					_defaultSortLabel = (configXML.defaultsortfield == "") ? null : resourceManager.getString('PortalWidgetStrings', configXML.defaultsortfield);
+					_defaultSortOrder = (configXML.defaultsortorder != PortalQueryParameters.ASCENDING_SORT &&
+					configXML.defaultsortorder != PortalQueryParameters.DESCENDING_SORT) ? PortalQueryParameters.ASCENDING_SORT : configXML.defaultsortorder;
+					
+					portalArcGIS.url = _arcgisOnlineURL;
+					
+					
+					
+					lastSortOrder = new SortObject(_defaultSortField, _defaultSortLabel, _defaultSortOrder);
+					// lastSortOrder = new SortObject(null, 'created', PortalQueryParameters.ASCENDING_SORT);
+		
+					defaultQueryParameters = new PortalQueryParameters();
+					defaultQueryParameters.withQuery('+type:("KML" OR "Image Service" OR "Map Service" OR "Feature Service" OR "WMS" OR "WMTS" OR "Web Map")');				
+					defaultQueryParameters.withLimit(_numberPerPage);
+					
+					if (_defaultGroupID==""){
+						_defaultGroupID="6e4b9e40f5c74be99564234160d26938";
+					}
+					if (_defaultGroupLabel==""){
+						_defaultGroupLabel="vUSA";
+					}
+					
+					defaultQueryParameters.inGroup(_defaultGroupID);
+					
+					
+					portalArcGIS.load();
+					
+					var arSort:Array = new Array();
+					var obj:Object = { value: null, label: resourceManager.getString('PortalWidgetStrings', 'relevance')};
+					arSort.push(obj);
+					obj = { value: 'title', label: resourceManager.getString('PortalWidgetStrings', 'title')};
+					arSort.push(obj);
+					obj = { value: 'owner', label: resourceManager.getString('PortalWidgetStrings', 'owner')};
+					arSort.push(obj);
+					obj = { value: 'avgRating', label: resourceManager.getString('PortalWidgetStrings', 'avgRating')};
+					arSort.push(obj);
+					obj = { value: 'numViews', label: resourceManager.getString('PortalWidgetStrings', 'numViews')};
+					arSort.push(obj);
+					obj = { value: 'created', label: resourceManager.getString('PortalWidgetStrings', 'created')};
+					arSort.push(obj);
+					
+					sorter.options = arSort;
+					sorter.selectedSort = lastSortOrder;
+					sorter.addEventListener("sortClick", sorter_sortClickHandler);
+					addEventListener("addSearchItem", addMapLayer);
+					addEventListener("deleteSearchItem", deleteMapLayer);
+				}
+			}
+			
+			
+			protected function goLayers():void
+			{
+				this.currentState="layers";
+				portalWidget.selectedTitlebarButtonIndex = 1;
+			}
+			protected function goSearch():void
+			{
+				portalWidget.selectedTitlebarButtonIndex = 0;
+				
+				if (portalArcGIS.signedIn)
+				{
+					this.setCurrentState("loggedin");
+				}
+				else {
+					this.setCurrentState("loggedout");
+				}
+			}
+			
+			protected function addMapLayer(event:AddToMapEvent):void
+			{
+				trace("addMapLayer");
+				portalItemsList.enabled=false;
+				
+				var pItem:PortalItem = event.item;
+				var layer:Layer;
+				if (pItem.type!="Web Mapping Application"){
+					myItems.addItem(pItem);
+				}
+				
+				
+				
+				switch (pItem.type)
+				{
+					case PortalItem.TYPE_FEATURE_SERVICE:
+					{
+						layer = new FeatureLayer(pItem.url);
+						Alert.show(pItem.url);
+						break;
+					}
+					case PortalItem.TYPE_MAP_SERVICE:
+					{
+						layer = new ArcGISDynamicMapServiceLayer(pItem.url);
+					
+						break;
+					}
+					case PortalItem.TYPE_KML_SERVICE:
+					{
+						layer = new KMLLayer(pItem.url);
+						break;
+					}
+					case PortalItem.TYPE_IMAGE_SERVICE:
+					{
+						layer = new ArcGISImageServiceLayer(pItem.url);
+						break;
+					}
+					case PortalItem.TYPE_WEB_MAP:
+					{
+						
+						
+						loadWebMap(pItem.id);
+						
+						break;
+					}
+					case PortalItem.TYPE_WEB_MAPPING_APPLICATION:
+					{
+						
+						portalItemsList.enabled=true;
+						//create a url request for the add click since this isn't a map layer
+						var requestUrl:URLRequest= new URLRequest();
+											
+						requestUrl.url=pItem.url;
+						navigateToURL(requestUrl,'_blank');
+						break;
+					}
+						
+						
+					default:
+					{
+						Alert.show(pItem.type + "is not able to be added as map layer.", "Unable to process layer type.");
+						portalItemsList.enabled=true;
+						break;
+					}
+				}
+				
+				if (layer)
+				{
+					layer.name = pItem.title;
+					map.addLayer(layer);
+					
+					portalItemsList.enabled=true;
+				}
+			}
+			
+			protected function deleteMapLayer(event:DeleteFromMapEvent):void
+			{
+				var pItem:PortalItem = event.item;
+				var layer:Layer;
+				var item:Object;
+				
+				for (var i:int = 0; i < myItems.length; i++)
+				{
+				
+					if (myItems[i].id==pItem.id){
+					
+						myItems.removeItemAt(i);
+					}
+				}
+				
+				if (pItem.type==PortalItem.TYPE_WEB_MAP){
+					deleteWebMap(pItem.id);
+				}
+					
+				else {
+					for each (layer in map.layers){
+						if (layer.name==pItem.title){
+							map.removeLayer(layer);
+						}
+					}
+					
+				}
+				
+				
+				
+			}
+			protected function deleteWebMap(webMapItemID:String):void
+			{	
+				
+				
+				if (webMapItemID)
+				{
+					var webMapUtil:WebMapUtil = new WebMapUtil();
+					var listen:mx.rpc.Responder=new mx.rpc.Responder(webMapUtil_deleteMapByIdResultHandler, webMapUtil_deleteMapByIdFaultHandler);
+					
+					webMapUtil.createMapById(webMapItemID, listen);
+					
+					function webMapUtil_deleteMapByIdResultHandler(result:WebMapEvent):void
+					{
+				
+						
+						var layers:ArrayCollection = result.map.layers as ArrayCollection;
+						var currentMapLayer:Layer;
+						var i:int;
+						
+						for (i = 0; i < layers.length; i++)
+						{
+							var webMapLayer:Layer = layers[i];
+							var isOpLayer:Boolean = webMapLayer.id.indexOf("base") != 0;
+							var label:String = "";
+						
+							if (isOpLayer)
+							{
+								label = webMapLayer.name;
+							}
+							for each (currentMapLayer in map.layers){
+								if (currentMapLayer.name==webMapLayer.name){
+									map.removeLayer(currentMapLayer);
+								}
+							}
+						
+						}
+					}
+					
+					function webMapUtil_deleteMapByIdFaultHandler(error:Fault):void
+					{
+						AppEvent.showError(
+							ErrorMessageUtil.getKnownErrorCauseMessage(error)
+							+ "\n\n" + ErrorMessageUtil.buildFaultMessage(error), "ConfigManager");
+						
+			
+					}
+						
+						
+				}
+			}
+			
+			protected function loadWebMap(webMapItemID:String):void
+			{	
+				
+				
+				if (webMapItemID)
+				{
+					var webMapUtil:WebMapUtil = new WebMapUtil();
+					webMapUtil.bingMapsKey = configData.bingKey;
+					webMapUtil.proxyURL = configData.proxyUrl;
+					if (GeometryServiceSingleton.instance.url)
+					{
+						webMapUtil.geometryService = GeometryServiceSingleton.instance;
+					}
+					var portalURL:String = configXML.map.@portalurl[0] || configXML.map.@arcgissharingurl[0];
+					if (portalURL)
+					{
+						webMapUtil.portalURL = portalURL;
+					} 
+					var listen:mx.rpc.Responder=new mx.rpc.Responder(webMapUtil_createMapByIdResultHandler, webMapUtil_createMapByIdFaultHandler);
+					
+					webMapUtil.createMapById(webMapItemID, listen);
+					
+					function webMapUtil_createMapByIdResultHandler(result:WebMapEvent):void
+					{
+											
+						var layers:ArrayCollection = result.map.layers as ArrayCollection;
+						var i:int;
+						
+						for (i = 0; i < layers.length; i++)
+						{
+							var layer:Layer = layers[i];
+							var isOpLayer:Boolean = layer.id.indexOf("base") != 0;
+							
+							var label:String = "";
+							if (isOpLayer)
+							{
+								label = layer.name;
+							}
+							layer.id = label;
+								
+							
+							
+							if (isOpLayer)
+							{
+								
+								map.addLayer(layer);
+								
+							}
+							
+							
+						}
+						
+						
+						portalItemsList.enabled=true;
+						
+					}
+					
+					function webMapUtil_createMapByIdFaultHandler(error:Fault):void
+					{
+						AppEvent.showError(
+							ErrorMessageUtil.getKnownErrorCauseMessage(error)
+							+ "\n\n" + ErrorMessageUtil.buildFaultMessage(error), "ConfigManager");
+						
+						portalItemsList.enabled=true;
+					}
+				}
+			}
+			
+		
+			
+			protected function lblLogin_clickHandler(event:MouseEvent):void
+			{
+				//re-search
+				if (this.currentState == "loggedin")
+				{
+					this.setCurrentState("loggedout");
+					username = "";
+					password = "";
+					
+					portalArcGIS.signOut();
+					chkMyGroups.enabled=false;
+					
+				}
+				else
+				{
+					var alert:PortalLoginPopup = new PortalLoginPopup();
+					alert.addEventListener(LoginEvent.LOGIN_PROVIDED, loginProvided);
+					alert.addEventListener(LoginEvent.LOGIN_CANCELLED, loginCancelled);
+					alert.show(true);
+				
+				}
+			}
+			
+			protected function loginProvided(event:widgets.Portal.events.LoginEvent):void
+			{
+				
+				trace("Provided");
+				username = event.username;
+				password = event.password;
+				defaultQueryParameters = new PortalQueryParameters();
+				defaultQueryParameters.ofUser(username);
+			
+				portalArcGIS.signInWithCredentials(username, password);
+					
+				
+				
+				
+			}
+			protected function myTest(event:PortalEvent):void
+			{
+				Alert.show(portalArcGIS.signedIn.toString());
+			
+			}
+			protected function loginCancelled(event:LoginEvent):void
+			{
+				trace("Cancelled");
+			}
+			
+			protected function portalArcGIS_loadHandler(event:PortalEvent):void
+			{
+				trace("loadHandler");
+
+					
+					
+					if (portalArcGIS.signedIn)
+					{
+						this.setCurrentState("loggedin");
+						LoginStatusLabel.text =  username;
+						chkMyGroups.enabled=true;
+						var user:PortalUser = portalArcGIS.user;
+						groupResultsAC= new ArrayCollection(user.groups);
+						var firstEntry:Object=new Object;
+						firstEntry.title="All My Groups";											
+						groupResultsAC.addItemAt(firstEntry,0);
+						listGroups.selectedIndex=0;
+						
+					}
+					else
+					{
+						
+						LoginStatusLabel.text = resourceManager.getString('PortalWidgetStrings', 'getPublicOnly');
+					}
+					
+				portalArcGIS_sendQueryItems(_searchText);
+			}
+			
+			
+			
+			protected function portalArcGIS_sendQueryItems(queryString:String):void
+			{
+				trace("sendQueryItems");
+				
+				goSearch();
+				//get search string
+				_searchText = queryString;
+				lastQueryString = queryString;
+				resultsArray=new Array;
+				
+				//test clearing portalItemsArrayList before query or queries take place so we can add it up in the results
+				portalItemsArrayList = new ArrayList(null);
+				//set results to zero before starting query or queries so we can add it up later in the results
+				_searchTotal=0;
+				
+				
+				//verify chkMyGroups is enabled and selected befor trying to query
+				if (chkMyGroups.enabled==true && chkMyGroups.selected==true){
+					var user:PortalUser = portalArcGIS.user;
+					
+					//hard coded first item on list to be All My Groups...if this value then loop through groups and send multiple queries
+					if (currentGroupTitle=="All My Groups"){
+						
+						for each (var group:PortalGroup in user.groups)
+						{
+							var queryParameters:PortalQueryParameters = defaultQueryParameters.clone();
+							queryParameters.inGroup(group.id);
+							queryParameters.sortField = lastSortOrder.sortField;
+							queryParameters.sortOrder = lastSortOrder.sortOrder;
+							queryParameters.addQueryCondition(queryString);
+							portalArcGIS.queryItems(queryParameters);
+							
+						}
+					}
+						//query just the single group selected from the groups list
+					else {
+						var queryParameters:PortalQueryParameters = defaultQueryParameters.clone();
+						queryParameters.inGroup(currentGroupID);
+						queryParameters.sortField = lastSortOrder.sortField;
+						queryParameters.sortOrder = lastSortOrder.sortOrder;
+						queryParameters.addQueryCondition(queryString);
+						portalArcGIS.queryItems(queryParameters);
+						
+					}
+					
+				}//end of chkMyGroups selected 
+					
+					//standard query if chckMyGroups is not enabled or selected
+				else {
+					var queryParameters:PortalQueryParameters = defaultQueryParameters.clone();
+					queryParameters.sortField = lastSortOrder.sortField;
+					queryParameters.sortOrder = lastSortOrder.sortOrder;
+					queryParameters.addQueryCondition(queryString);
+					portalArcGIS.queryItems(queryParameters);
+					
+				}
+				
+				
+				
+			}
+			
+			protected function portalPager_newQueryHandler(event:PortalQueryEvent):void
+			{
+				trace("new pager query");
+				
+				portalArcGIS.queryItems(event.queryParameters);
+			}
+			
+			protected function portalArcGIS_queryItemsCompleteHandler(event:PortalEvent):void
+			{
+				trace("queryItemsComplete");
+				
+				lastQueryResult = event.queryResult as PortalQueryResult;
+				_searchTotal = _searchTotal + lastQueryResult.totalResults;
+				
+				resultsArray = resultsArray.concat(lastQueryResult.results);
+				//add the results from that query "session"..could be a single or could be multiple query results added
+				
+				var numResults:int = resultsArray.length;
+				
+				
+				
+				portalItemsList.selectedIndex = -1;
+				
+				
+				if (_searchTotal > 0)
+				{
+					
+					portalItemsArrayList = new ArrayList(resultsArray);
+					
+					portalItemsList.selectedItem = null;
+					
+					
+				}
+				else {
+					//portalItemsArrayList = new ArrayList(null);
+					
+					
+				}
+			}
+			
+			
+			
+			protected function portalArcGIS_faultHandler(event:FaultEvent):void
+			{
+				trace("faultHandler");
+				
+				
+				if (event.fault.faultCode=="400"){
+					
+					var alert:PortalLoginPopup = new PortalLoginPopup();
+					
+					alert.addEventListener(LoginEvent.LOGIN_PROVIDED, loginProvided);
+					alert.addEventListener(LoginEvent.LOGIN_CANCELLED, loginCancelled);
+					alert.show(true);
+					Alert.show("Incorrect Username or Password");
+				}
+				
+			}
+			
+			protected function sorter_sortClickHandler(event:SortByEvent):void
+			{
+				trace("sortClickHandler");
+				
+				lastSortOrder = event.currentTarget.selectedSort;
+				
+				portalArcGIS_sendQueryItems(lastQueryString);
+			}
+			
+			protected function check_changeHandler(event:Event):void
+			{
+				searchGroups.height=0;
+				searchGroups.visible=false;
+				if (chkVUSA.selected==false && chkAGOL.selected==false && chkMyGroups.selected==false){
+					chkVUSA.selected=true;
+					
+				}
+				
+				if (chkVUSA.selected==true){
+					
+					var vUSA:String=_defaultGroupID;
+					defaultQueryParameters = new PortalQueryParameters();
+					defaultQueryParameters.withQuery('+type:("KML" OR "Image Service" OR "Map Service" OR "Feature Service" OR "WMS" OR "WMTS" OR "Web Map")');				
+					defaultQueryParameters.withLimit(_numberPerPage);
+					
+					defaultQueryParameters.inGroup(vUSA);
+					
+				}
+				if (chkAGOL.selected==true){
+					defaultQueryParameters = new PortalQueryParameters();
+					defaultQueryParameters.withQuery('+type:("KML" OR "Image Service" OR "Map Service" OR "Feature Service" OR "WMS" OR "WMTS" OR "Web Map")');				
+					defaultQueryParameters.withLimit(_numberPerPage);
+					
+					
+				}
+				if (chkMyGroups.selected==true){
+					searchGroups.height=20;
+					searchGroups.visible=true;
+					defaultQueryParameters = new PortalQueryParameters();
+					defaultQueryParameters.withQuery('+type:("KML" OR "Image Service" OR "Map Service" OR "Feature Service" OR "WMS" OR "WMTS" OR "Web Map")');				
+					defaultQueryParameters.withLimit(_numberPerPage);
+					
+				}
+				
+				portalArcGIS_sendQueryItems(searchTextInput.text);
+				
+			}
+			
+			protected function listGroups_changeHandler(event:DropDownEvent):void
+			{
+				// list change event
+				currentGroupTitle=listGroups.selectedItem.title;
+				currentGroupID=listGroups.selectedItem.id;
+				
+				portalArcGIS_sendQueryItems(_searchText);
+			}
+			
+			protected function niscLogo_clickHandler(event:MouseEvent):void
+			{
+			
+				//create a url request for NISC
+				var requestUrl:URLRequest= new URLRequest();
+				
+				requestUrl.url="http://nisconsortium.org/?page_id=936";
+				navigateToURL(requestUrl,'_blank');
+				
+			}
+			
+		]]>
+	</fx:Script>
+	
+	<fx:Declarations>
+		<s:DateTimeFormatter id="lastModifiedDateFormatter" dateStyle="medium"/>
+		
+		<esri:Portal id="portalArcGIS" 
+					 fault="portalArcGIS_faultHandler(event)"
+					 load="portalArcGIS_loadHandler(event)"
+					 queryItemsComplete="portalArcGIS_queryItemsCompleteHandler(event)"
+					 queryGroupsComplete="portalArcGIS_queryItemsCompleteHandler(event)"/>
+	</fx:Declarations>
+	
+	<viewer:WidgetTemplate id="portalWidget"
+						   width="{70 + (_numberColumns * 400)}" height="590">
+		<viewer:layout>
+			<s:VerticalLayout horizontalAlign="center" verticalAlign="middle"/>
+		</viewer:layout>
+		
+		
+		<s:HGroup width="100%" verticalAlign="middle" includeIn="loggedin, loggedout, layers">
+			
+			<components:PromptTextInput id="searchTextInput"
+										width="50%"
+										enter="portalArcGIS_sendQueryItems(searchTextInput.text)"
+										promptText="@Resource(key='searchPrompt', bundle='PortalWidgetStrings')"
+										skinClass="widgets.Portal.skins.PromptTextInputSkin"/>
+			
+			<components:IconButton id="searchButton"
+								   click="portalArcGIS_sendQueryItems(searchTextInput.text)"
+								   imageSource="@Embed(source='./assets/images/i_generic_search.png')"
+								   skinClass="widgets.Portal.skins.IconButtonSkin"
+								   toolTip="@Resource(key='search', bundle='PortalWidgetStrings')"/>
+			<s:Label width="40%" paddingLeft="10"
+					 maxDisplayedLines="1"
+					 showTruncationTip="true"
+					 text="{_searchTotal.toString()+ ' ' + resourceManager.getString('PortalWidgetStrings', 'resultsFor')}"/>
+			
+			<s:Label id="lblLogin"
+					 buttonMode="true"
+					 click="lblLogin_clickHandler(event)"
+					 mouseChildren="false"
+					 text.loggedin="Logout"
+					 text.loggedout="Login"
+					 useHandCursor="true"/>
+			
+		</s:HGroup>
+		<s:HGroup width="100%" horizontalAlign="right" includeIn="loggedin, loggedout, layers">
+	
+			<s:Label id="LoginStatusLabel" paddingTop="5" />
+			
+		</s:HGroup>
+		<s:HGroup width="100%" horizontalAlign="left" includeIn="loggedin, loggedout, layers">
+			<s:CheckBox id="chkVUSA" selected="true" label="{_defaultGroupLabel}" click="chkAGOL.selected=false;chkMyGroups.selected=false;check_changeHandler(event)"/>
+			
+			<s:CheckBox id="chkAGOL" selected="false" label="All AGOL" click="chkVUSA.selected=false;chkMyGroups.selected=false;check_changeHandler(event)"/>
+			<s:CheckBox id="chkMyGroups" selected="false" label="My Groups" enabled="false" click="chkAGOL.selected=false;chkVUSA.selected=false;check_changeHandler(event)" />
+	
+		</s:HGroup>
+		
+		<s:HGroup id="searchGroups" visible="false" height="0" width="100%" verticalAlign="middle" horizontalAlign="left" includeIn="loggedin, loggedout, layers">
+			<s:Label text="Search My Group: "/>
+			<s:DropDownList id="listGroups" selectedItem="0" width="100%" labelField="title" close="listGroups_changeHandler(event)" dataProvider="{groupResultsAC}"/>
+			
+		</s:HGroup>
+		
+		
+		
+		<s:VGroup width="100%"
+				  paddingBottom="0"
+				  paddingTop="5">
+			<mx:HRule width="100%"/>
+		</s:VGroup>
+		
+		<s:VGroup id="searchResults" includeIn="loggedin, loggedout"
+				  width="100%" height="100%">
+			<s:HGroup width="100%" verticalAlign="middle">
+				<s:Spacer width="100%"/>
+				<components:SortBy id="sorter"/>
+			</s:HGroup>
+			
+			<s:BorderContainer width="100%" height="100%"
+							   alpha="{getStyle('contentBackgroundAlpha')}"
+							   backgroundColor="{getStyle('contentBackgroundColor')}"
+							   borderVisible="true"
+							   borderWeight="1">
+				<s:List id="portalItemsList"
+						width="100%" height="99%"
+						allowMultipleSelection="false"
+						borderVisible="false"
+						dataProvider="{portalItemsArrayList}">
+					<s:layout>
+						<s:TileLayout paddingBottom="2"
+									  paddingLeft="2"
+									  paddingTop="2"
+									  requestedColumnCount="{_numberColumns}"/>
+					</s:layout>
+					<s:itemRenderer>
+						<fx:Component>
+							<renderers:PortalItemRenderer/>
+						</fx:Component>
+					</s:itemRenderer>
+				</s:List>
+				
+			</s:BorderContainer>
+			<!--
+			<components:PortalQueryResultPager id="portalPager"
+			width="100%"
+			newQuery="portalPager_newQueryHandler(event)"
+			queryResult="{lastQueryResult}"
+			skinClass="widgets.Portal.skins.PortalQueryResultPagerSkin"/>
+			--> 
+		</s:VGroup>
+		<s:VGroup id="addResults" includeIn="layers"
+				  width="100%" height="100%">
+			<s:List id="addedItemsList"
+					width="100%" height="99%"
+					allowMultipleSelection="false"
+					borderVisible="false"
+					dataProvider="{myItems}">
+				<s:layout>
+					<s:TileLayout paddingBottom="2"
+								  paddingLeft="2"
+								  paddingTop="2"
+								  requestedColumnCount="{_numberColumns}"/>
+				</s:layout>
+				<s:itemRenderer>
+					<fx:Component>
+						<renderers:PortalRemoveItemRenderer/>
+					</fx:Component>
+				</s:itemRenderer>
+			</s:List>
+			
+		</s:VGroup>
+		<s:HGroup>
+			
+			<s:Image id="niscLogo"
+					 width="184" height="40"
+					 click="niscLogo_clickHandler(event)"
+					 horizontalAlign="center"
+					 source="@Embed(source='./widgets/Portal/assets/images/NISC_40.png')"
+					 verticalAlign="middle"/>
+		</s:HGroup>
+	</viewer:WidgetTemplate>
+</viewer:BaseWidget>

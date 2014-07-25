@@ -1,0 +1,14 @@
+<!-- use defaultgrouplabel and id to customize with a default query of a specific group (or organization) -->
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+	<defaultgrouplabel>vUSA</defaultgrouplabel>
+	<defaultgroupid>6e4b9e40f5c74be99564234160d26938</defaultgroupid>
+    <arcgisonlineurl>http://www.arcgis.com</arcgisonlineurl>
+    <tokenurl>https://www.arcgis.com/sharing/generateToken</tokenurl>
+    <resultsperpage>100</resultsperpage>
+    <defaultsearch></defaultsearch>
+    <defaultsortfield></defaultsortfield>
+    <defaultsortorder>desc</defaultsortorder>
+    <columnsize>
+    </columnsize>
+</configuration>
